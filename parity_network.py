@@ -124,10 +124,10 @@ def paulis_to_bitstrings(paulis, n_qubits):
     return S
 
 
-if __name__ == "__main__":
+def main(n):
     strings = open("hamiltonian.txt").readlines()[0]
     weights, paulis = string_to_paulis(strings)
-    num_qubits = 5
+    num_qubits = n
     S_example = paulis_to_bitstrings(paulis, num_qubits)
     print("Starting Bit Strings:")
     print(S_example)
@@ -148,3 +148,9 @@ if __name__ == "__main__":
     print(qc_example.decompose())
     print("Final Wire State:")
     print(get_wire_matrix(qc_example.decompose()))
+
+    return qc_example
+
+
+if __name__ == "__main__":
+    main()
