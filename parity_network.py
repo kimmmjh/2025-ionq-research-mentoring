@@ -1,7 +1,6 @@
-# This is from Colin Campbell - February 20, 2025
-
 import numpy as np
 from qiskit import QuantumCircuit
+from qiskit.circuit import Parameter
 from itertools import combinations
 
 
@@ -9,46 +8,81 @@ def weight(s: str):
     return sum([1 for char in s if char == "1"])
 
 
-def alg_1(S: set[str]):
+def alg_1(term_dict: dict, gamma: Parameter, num_qubits: int):
     """
-    Algorithm 1 in the paper, designed to greedily build the parity netweork for an input set of bit strings
-    S: set of bit strings representing products of pauli Z operators
-    return: QuantumCircuit representing a parity network hitting each bit string in S at least once
+    Algorithm 1 from the paper.
+
+    This function first applies Rz gates for all single-qubit terms,
+    and then greedily builds the CNOT network for multi-qubit terms, inserting
+    their Rz gates as they are created.
+
+    Args:
+        term_dict (dict): A dictionary mapping bitstring parities to their weights.
+        gamma (Parameter): The QAOA gamma parameter for the Rz rotation.
+        num_qubits (int): The number of qubits.
+
+    Returns:
+        QuantumCircuit: The forward journey circuit with CNOTs and Rz gates.
     """
-    n = len(next(iter(S)))
-    qc = QuantumCircuit(n)
-    S = {s for s in S if weight(s) != 1}  # First order terms are "free"
+    if not term_dict:
+        return QuantumCircuit(0)
+
+    qc = QuantumCircuit(num_qubits)
+
+    # Separate single-qubit terms from multi-qubit terms.
+    single_qubit_terms = {s: w for s, w in term_dict.items() if weight(s) == 1}
+    multi_qubit_terms = {s: w for s, w in term_dict.items() if weight(s) > 1}
+
+    # Apply Rz gates for all single-qubit terms immediately.
+    for s, w in single_qubit_terms.items():
+        wire_index = s.find("1")
+        angle = 2 * gamma * float(w)
+        qc.rz(angle, wire_index)
+
+    # Multi-qubit terms.
+    S = {s: s for s in multi_qubit_terms.keys()}
+
     while S:
-        s_min = min(S, key=weight)
-        I = set(i for i, char in enumerate(s_min) if char == "1")
-        i = min(I)
-        j = min(I - {i})
-        qc.cx(i, j)
-        S_prime = set()
-        for s in S:
-            s_prime = s
-            new_bit = str((int(s_prime[i]) + int(s_prime[j])) % 2)
-            s_prime = "".join(
-                [char if idx != i else new_bit for idx, char in enumerate(s_prime)]
-            )
-            if weight(s_prime) > 1:
-                S_prime.add(s_prime)
-        S = S_prime
+        s_min_orig, s_min_transformed = min(S.items(), key=lambda item: weight(item[1]))
+
+        I = {i for i, char in enumerate(s_min_transformed) if char == "1"}
+        control_qubit = min(I)
+        target_qubit = min(I - {control_qubit})
+
+        qc.cx(control_qubit, target_qubit)
+
+        next_S = {}
+        for s_orig, s_transformed in S.items():
+            s_list = list(s_transformed)
+            if s_list[control_qubit] == s_list[target_qubit]:
+                s_list[control_qubit] = "0"
+            else:
+                s_list[control_qubit] = "1"
+            s_new_transformed = "".join(s_list)
+
+            if weight(s_new_transformed) == 1:
+                wire_index = s_new_transformed.find("1")
+                angle = 2 * gamma * float(multi_qubit_terms[s_orig])
+                qc.rz(angle, wire_index)
+            elif weight(s_new_transformed) > 1:
+                next_S[s_orig] = s_new_transformed
+            else:
+                pass
+        S = next_S
     return qc
 
 
 def get_wire_matrix(qc: QuantumCircuit):
     """
-    Function for determining the state of the parities for an input parity network (QuantumCircuit). Nonzero values in a row represent the parities included in the wire of that row. For example, a row such as [1, 0, 0, 1, 0] represents a wire having parity x_0 \oplus x_3.
-    qc: QuantumCircuit representing a parity network (only includes CX gates)
-    return: boolean array representing the current state of the wires after the parity network.
+    Function for determining the state of the parities for an input parity network (QuantumCircuit).
     """
-    A = np.eye(qc.num_qubits)
+    A = np.eye(qc.num_qubits, dtype=int)
     for instr in qc.data:
-        if instr.operation.name != "cx":
-            raise ValueError("Circuit is not a parity network")
-        control, target = [q._index for q in instr.qubits]
-        A[target, :] = (A[control, :] + A[target, :]) % 2
+        if (
+            instr.operation.name == "cx"
+        ):  # Since there are rz gates now, we need to check for cx gates
+            control, target = [q._index for q in instr.qubits]
+            A[target, :] = (A[control, :] + A[target, :]) % 2
     return A
 
 
@@ -67,90 +101,87 @@ def bits_saved(row_i, row_j):
 
 def alg2(A: np.array):
     """
-    Algorithm 2 from the paper. Performd greedy elimination to produce a circuit that can be used to invert a parity network so that it points at the identity (or permutation therof).
-    A: boolean array representing the wire after a parity network
-    return: QuantumCircuit inverting the wire state based on a greedy elimination heuristic
+    Return journey algotirhm.
     """
     n = A.shape[0]
     qc = QuantumCircuit(n)
-    while A.sum() > n:
+    A_temp = A.copy()
+    while A_temp.sum() > n:
         row_index_combinations = combinations(range(n), 2)
         l, m = max(
             row_index_combinations,
-            key=lambda comb: bits_saved(A[comb[0], :], A[comb[1], :]),
+            key=lambda comb: bits_saved(A_temp[comb[0], :], A_temp[comb[1], :]),
         )
-        Al = A[l, :]
-        Am = A[m, :]
+
+        Al = A_temp[l, :]
+        Am = A_temp[m, :]
         if Al.sum() < Am.sum():
             qc.cx(l, m)
-            A[m, :] = (Al + Am) % 2
+            A_temp[m, :] = (Al + Am) % 2
         else:
             qc.cx(m, l)
-            A[l, :] = (Al + Am) % 2
+            A_temp[l, :] = (Al + Am) % 2
     return qc
 
 
-def string_to_paulis(strings):
-    weights = []
-    paulis = []
-    terms = strings.split(" + ")
-
+def paulis_to_dict(hamiltonian_string, n_qubits):
+    """Creates a dictionary mapping bitstrings to their weights from a Hamiltonian string."""
+    term_dict = {}
+    terms = hamiltonian_string.strip().split(" + ")
     for term in terms:
-        weight, pauli = term.split("*")
-
-        weights.append(weight)
-        paulis.append(pauli)
-
-    return weights, paulis
-
-
-def paulis_to_bitstrings(paulis, n_qubits):
-    S = set()
-    pos = []
-    for pauli in paulis:
-        temp = []
-        for s in pauli:
-            if s.isdigit():
-                temp.append(s)
-            else:
-                continue
-        pos.append(temp)
-    for p in pos:
-        bitstring = ["0"] * n_qubits
-        for index in p:
-            bitstring[int(index)] = "1"
-        S.add("".join(bitstring))
-
-    return S
+        try:
+            weight_str, pauli_str = term.split(" * ")
+            bitstring = ["0"] * n_qubits
+            indices = "".join(filter(str.isdigit, pauli_str))
+            for index in indices:
+                bitstring[int(index)] = "1"
+            term_dict["".join(bitstring)] = float(weight_str)
+        except (ValueError, IndexError):
+            print(
+                f"Skipping malformed term: {term}. There has to be a space between all the + and *."
+            )
+            continue
+    return term_dict
 
 
 def main(n):
+    gamma = Parameter("γ")
     strings = open("hamiltonian.txt").readlines()[0]
-    weights, paulis = string_to_paulis(strings)
-    num_qubits = n
-    S_example = paulis_to_bitstrings(paulis, num_qubits)
-    print("Starting Bit Strings:")
-    print(S_example)
 
-    qc_example = alg_1(S_example)
-    print("Parity Network:")
-    print(qc_example)
+    term_dict = paulis_to_dict(strings, n)
 
-    wire_matrix = get_wire_matrix(qc_example)
-    print("Ending wire state:")
-    print(wire_matrix)
+    print("Parities and Weights of the Hamiltonian:")
+    print(term_dict)
+
+    qc_forward_with_rz = alg_1(term_dict, gamma, n)
+    print("\nForward Circuit with Rz gates:")
+    print(qc_forward_with_rz)
+
+    wire_matrix = get_wire_matrix(qc_forward_with_rz)
+    # print("\nEnding wire state of forward circuit:")
+    # print(wire_matrix)
 
     inv = alg2(wire_matrix)
-    print("Inverting Circuit:")
+    print("\nReturn Journey Circuit:")
     print(inv)
-    qc_example.append(inv, range(qc_example.num_qubits))
-    print("Full Circuit:")
-    print(qc_example.decompose())
-    print("Final Wire State:")
-    print(get_wire_matrix(qc_example.decompose()))
 
-    return qc_example
+    # Combine the forward and inverse circuits
+    full_circuit = qc_forward_with_rz.compose(inv)
+    print("\nFull Circuit:")
+    print(full_circuit.decompose())
+
+    # Verify that the final CNOT transformation is the identity
+    print("\nFinal Wire State (should be identity):")
+    final_matrix = get_wire_matrix(full_circuit.decompose())
+    print(final_matrix)
+    if np.allclose(final_matrix, np.eye(n)):
+        print("Verification Successful!")
+    else:
+        print("Verification Failed.")
+
+    return full_circuit
 
 
 if __name__ == "__main__":
-    main()
+    num_qubits = 5  # Example number of qubits
+    main(num_qubits)
