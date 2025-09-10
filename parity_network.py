@@ -125,22 +125,39 @@ def alg2(A: np.array):
 
 
 def paulis_to_dict(hamiltonian_string, n_qubits):
-    """Creates a dictionary mapping bitstrings to their weights from a Hamiltonian string."""
+    """
+    Creates a dictionary mapping bitstrings to their weights from a Hamiltonian string.
+    This version is updated to correctly handle negative weights and inconsistent spacing.
+    """
     term_dict = {}
-    terms = hamiltonian_string.strip().split(" + ")
+
+    hamil_string = hamiltonian_string.replace(" - ", " + -")
+
+    terms = hamil_string.strip().split("+")
+
     for term in terms:
+        term = term.strip()
+        if not term:
+            continue
+
         try:
-            weight_str, pauli_str = term.split(" * ")
+            parts = term.split("*")
+            if len(parts) != 2:
+                raise ValueError("Term does not contain a single '*' separator.")
+
+            weight_str = parts[0].strip()
+            pauli_str = parts[1].strip()
+
             bitstring = ["0"] * n_qubits
             indices = "".join(filter(str.isdigit, pauli_str))
             for index in indices:
                 bitstring[int(index)] = "1"
+
             term_dict["".join(bitstring)] = float(weight_str)
-        except (ValueError, IndexError):
-            print(
-                f"Skipping malformed term: {term}. There has to be a space between all the + and *."
-            )
+        except (ValueError, IndexError) as e:
+            print(f"Skipping malformed term: '{term}'. Error: {e}")
             continue
+
     return term_dict
 
 
@@ -179,9 +196,9 @@ def main(n):
     else:
         print("Verification Failed.")
 
-    return full_circuit
+    return full_circuit, term_dict
 
 
 if __name__ == "__main__":
-    num_qubits = 5  # Example number of qubits
+    num_qubits = 8
     main(num_qubits)
