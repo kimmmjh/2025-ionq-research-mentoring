@@ -72,6 +72,7 @@ for bitmask, coeff in zip(
 
 
 output_string = " ".join(output_terms)
+print("Raw Hamiltonian string:\n", output_string)
 output_string = format_hamiltonian_string(output_string)
 
 print("The Hamiltonian is:\n", output_string)
