@@ -2,11 +2,43 @@ from qiskit.quantum_info import SparsePauliOp
 import re
 from collections import defaultdict
 
-num_qubits = 4
+num_qubits = 5  # 4 sat with 5 qubits
+
+# Each inner list is a clause. Each tuple is a literal (qubit_index, value).
+# value=1 means the variable is NOT negated (e.g., x_i)
+# value=0 means the variable IS negated (e.g., ¬x_i)
 clauses = [
-    [(0, 1), (1, 0), (2, 1)],  # x1 ∨ ¬x2 ∨ x3
-    [(0, 0), (1, 1), (3, 1)],  # ¬x1 ∨ x2 ∨ x4
+    # Clause 1: (x₀ ∨ ¬x₁ ∨ x₂ ∨ ¬x₃)
+    [(0, 1), (1, 0), (2, 1), (3, 0)],
+    # Clause 2: (¬x₀ ∨ x₁ ∨ ¬x₂ ∨ x₄)
+    [(0, 0), (1, 1), (2, 0), (4, 1)],
+    # Clause 3: (¬x₁ ∨ x₂ ∨ ¬x₃ ∨ ¬x₄)
+    [(1, 0), (2, 1), (3, 0), (4, 0)],
 ]
+
+# # --- Define the k-SAT Problem with 8 Qubits ---
+# num_qubits = 8
+
+# # A mix of 4-SAT and 5-SAT clauses to create a complex, high-order Hamiltonian.
+# # value=1 means the variable is NOT negated (e.g., x_i)
+# # value=0 means the variable IS negated (e.g., ¬x_i)
+# clauses = [
+#     # Clause 1 (5-SAT): (x₀ ∨ ¬x₂ ∨ x₃ ∨ ¬x₅ ∨ x₇)
+#     [(0, 1), (2, 0), (3, 1), (5, 0), (7, 1)],
+
+#     # Clause 2 (4-SAT): (¬x₀ ∨ x₁ ∨ ¬x₄ ∨ x₆)
+#     [(0, 0), (1, 1), (4, 0), (6, 1)],
+
+#     # Clause 3 (5-SAT): (x₁ ∨ x₂ ∨ ¬x₃ ∨ x₆ ∨ ¬x₇)
+#     [(1, 1), (2, 1), (3, 0), (6, 1), (7, 0)],
+
+#     # Clause 4 (4-SAT): (x₀ ∨ ¬x₄ ∨ x₅ ∨ ¬x₆)
+#     [(0, 1), (4, 0), (5, 1), (6, 0)],
+
+#     # Clause 5 (5-SAT): (¬x₁ ∨ ¬x₂ ∨ x₄ ∨ x₅ ∨ x₇)
+#     [(1, 0), (2, 0), (4, 1), (5, 1), (7, 1)],
+# ]
+
 
 penalty = 1.0
 
@@ -34,7 +66,7 @@ def clause_to_pauli(clause, num_qubits):
     return SparsePauliOp(paulis, coeffs)
 
 
-def format_hamiltonian_string(input_string: str) -> str:
+def format_pauli_string(input_string: str) -> str:
     pattern = re.compile(r"([+-]?\d+\.\d+)\+\d+\.\d+j\s*\*\s*([IZ][IZ\d]*)")
 
     matches = pattern.findall(input_string)
@@ -73,8 +105,9 @@ for bitmask, coeff in zip(
 
 output_string = " ".join(output_terms)
 print("Raw Hamiltonian string:\n", output_string)
-output_string = format_hamiltonian_string(output_string)
+print("\n\n")
 
+output_string = format_pauli_string(output_string)
 print("The Hamiltonian is:\n", output_string)
 
 
